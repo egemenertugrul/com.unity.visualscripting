@@ -41,7 +41,6 @@ namespace Unity.VisualScripting
 
         public int callbackOrder => 1;
 
-        private string linkerPath => Path.Combine(BoltCore.Paths.persistentGenerated, "link.xml");
         private string aotStubsPath => Path.Combine(BoltCore.Paths.persistentGenerated, "AotStubs.cs");
 
         [UsedImplicitly]
@@ -90,7 +89,6 @@ namespace Unity.VisualScripting
         {
             try
             {
-                GenerateLinker();
                 GenerateStubScript(aotStubsPath);
             }
             catch (Exception ex)
@@ -102,54 +100,7 @@ namespace Unity.VisualScripting
 
         private void DeleteAotStubs()
         {
-            PathUtility.DeleteProjectFileIfExists(linkerPath, true);
             PathUtility.DeleteProjectFileIfExists(aotStubsPath, true);
-        }
-
-        // Automatically generates the link.xml file to prevent stripping.
-        // Currently only used for plugin assemblies, because blanket preserving
-        // all setting assemblies sometimes causes the IL2CPP process to fail.
-        // For settings assemblies, the AOT stubs are good enough to fool
-        // the static code analysis without needing this full coverage.
-        // https://docs.unity3d.com/Manual/iphone-playerSizeOptimization.html
-        // However, for FullSerializer, we need to preserve our custom assemblies.
-        // This is mostly because IL2CPP will attempt to transform non-public
-        // property setters used in deserialization into read-only accessors
-        // that return false on PropertyInfo.CanWrite, but only in stripped builds.
-        // Therefore, in stripped builds, FS will skip properties that should be
-        // deserialized without any error (and that took hours of debugging to figure out).
-        private void GenerateLinker()
-        {
-            var linker = new XDocument();
-
-            var linkerNode = new XElement("linker");
-
-            if (!PluginContainer.initialized)
-                PluginContainer.Initialize();
-
-            foreach (var pluginAssembly in PluginContainer.plugins
-                     .SelectMany(plugin => plugin.GetType()
-                         .GetAttributes<PluginRuntimeAssemblyAttribute>()
-                         .Select(a => a.assemblyName))
-                     .Distinct())
-            {
-                var assemblyNode = new XElement("assembly");
-                var fullnameAttribute = new XAttribute("fullname", pluginAssembly);
-                var preserveAttribute = new XAttribute("preserve", "all");
-                assemblyNode.Add(fullnameAttribute);
-                assemblyNode.Add(preserveAttribute);
-                linkerNode.Add(assemblyNode);
-            }
-
-            linker.Add(linkerNode);
-
-            PathUtility.CreateDirectoryIfNeeded(BoltCore.Paths.transientGenerated);
-
-            PathUtility.DeleteProjectFileIfExists(linkerPath, true);
-
-            // Using ToString instead of Save to omit the <?xml> declaration,
-            // which doesn't appear in the Unity documentation page for the linker.
-            File.WriteAllText(linkerPath, linker.ToString());
         }
 
         private IEnumerable<AotStubWriter> FindAllDistinctProjectStubs()
@@ -227,28 +178,8 @@ namespace Unity.VisualScripting
                 EditorSceneManager.OpenScene(activeScenePath);
             }
 
-
-            #region AdditionalAOTStubs
-            // Find all Stubs for most Unity APIs
-            // else when using VisualScripting in AssetBundles, required AOT stubs are probably not generated
-
-            EditorUtility.DisplayProgressBar("AOT Pre-Build", "Additional AOT Stubs...", 0);
-
-            yield return new AotCommentStub("--------------- Additional Stubs");
-            foreach (var addditionalStub in FindAllAdditionalStubs())
-            {
-                yield return AotStubWriterProvider.instance.GetDecorator(addditionalStub);
-            }
-
-            #endregion
-
-
             EditorUtility.ClearProgressBar();
         }
-
-
-
-
 
         private IEnumerable<object> FindAllSettingsStubs()
         {
@@ -263,176 +194,6 @@ namespace Unity.VisualScripting
                 .OfType<MethodInfo>()
                 .Where(m => m.IsOperator() || m.IsUserDefinedConversion());
         }
-
-
-        #region AdditionalAOTStubs
-
-        // Only use members from specified namespaces
-        // This help to avoid the UnityEditor namespace (which is not present in builds)
-        // Fore some reason some namespaces don't need to be declared here (TMPro, some custom namespaces...)
-        readonly static HashSet<string> _allowedNamespaces = new(new[] {
-            "UnityEngine",
-            "UnityEngine.UI",
-            "UnityEngine.Audio",
-            "UnityEngine.Video",
-            "UnityEngine.Networking",
-            //"TMPro",
-            //"UnityEngine.AI",
-            //"UnityEngine.Animations",
-            //"UnityEngine.Events",
-            //"UnityEngine.EventSystems",
-            //"UnityEngine.Playables",
-        });
-
-        // Remove members with specific attributes
-        readonly static HashSet<string> _excludedAttributes = new(new[] {
-            "NativeMethodAttribute", // Platform specific Audio APIs (like gamepad speakers), not available on most platforms
-        });
-
-        // Some of these members don't compile, they are somewhat part of the editor functinalities
-        readonly static HashSet<string> _excludedBaseTypes = new(new[] {
-            "UnityEngine.LightingSettings" // Not available in runtime/platform assemblies
-        });
-        readonly static HashSet<string> _excludedTypeMembers = new(new[] {
-            "UnityEngine.Debug.ExtractStackTraceNoAlloc", // ArgumentException: The type 'System.Byte*' may not be used as a type argument.
-
-            // Not available in runtime/platform assemblies:
-            "UnityEngine.AudioSource.gamepadSpeakerOutputType",
-            "UnityEngine.Input.IsJoystickPreconfigured",
-            "UnityEngine.Light.SetLightDirty",
-            "UnityEngine.Light.shadowRadius",
-            "UnityEngine.Light.shadowAngle",
-            "UnityEngine.Light.areaSize",
-            "UnityEngine.Light.shadowRadius",
-            "UnityEngine.Light.lightmapBakeType",
-            "UnityEngine.LightProbeGroup.probePositions",
-            "UnityEngine.LightProbeGroup.dering",
-            "UnityEngine.MeshRenderer.scaleInLightmap",
-            "UnityEngine.MeshRenderer.receiveGI",
-            "UnityEngine.MeshRenderer.stitchLightmapSeams",
-            "UnityEngine.Terrain.bakeLightProbesForTrees",
-            "UnityEngine.Terrain.deringLightProbesForTrees",
-            "UnityEngine.TerrainData.GetClampedDetailPatches",
-            "UnityEngine.TerrainData.SetTerrainLayersRegisterUndo",
-            "UnityEngine.Texture2D.alphaIsTransparency",
-            "UnityEngine.ParticleSystemRenderer.supportsMeshInstancing",
-            "UnityEngine.QualitySettings.IsPlatformIncluded",
-            "UnityEngine.QualitySettings.GetActiveQualityLevelsForPlatform",
-            "UnityEngine.QualitySettings.GetActiveQualityLevelsForPlatformCount",
-            "UnityEngine.Material.IsChildOf",
-            "UnityEngine.Material.RevertAllPropertyOverrides",
-            "UnityEngine.Material.IsPropertyLocked",
-            "UnityEngine.Material.IsPropertyLockedByAncestor",
-            "UnityEngine.Material.IsPropertyOverriden",
-            "UnityEngine.Material.SetPropertyLock",
-            "UnityEngine.Material.ApplyPropertyOverride",
-            "UnityEngine.Material.RevertPropertyOverride",
-            "UnityEngine.Material.parent",
-            "UnityEngine.Material.isVariant",
-            "UnityEngine.ArticulationBody.jointAcceleration"
-        });
-        readonly static HashSet<string> _excludedMembers = new(new[] {
-            // Not available in runtime/platform assemblies
-            "runInEditMode", // Components
-            "imageContentsHash", // Textures
-            "OnRebuildRequested", // UI
-
-            // Unity/C# standard stuff we barely use (good optimization since it is present in most types)
-            "GetInstanceID",
-            "GetHashCode",
-            "GetType"
-        });
-
-        // Unsupported method paramters types
-        readonly static HashSet<string> _excludedParameterTypes = new(new[] {
-            "Span`1",
-            "ReadOnlySpan`1"
-        });
-
-
-        private IEnumerable<object> FindAllAdditionalStubs()
-        {
-            // Find AOT Stubs for most Unity APIs
-            // else when using VisualScripting in AssetBundles, required AOT stubs are probably not generated
-
-            // first get the largest possible codebase
-            var codebaseSubset = Codebase.Subset(Codebase.settingsTypes, TypeFilter.Any.Configured(), MemberFilter.Any.Configured());
-            codebaseSubset.Cache();
-
-            // then filter with our previously declared HashSets
-            return codebaseSubset.members
-                .Select(m => m.info)
-                .Where(memberInfo => {
-
-                    // Avoids Event, TypeInfo, Custom...
-                    if (memberInfo.MemberType != MemberTypes.Constructor
-                    && memberInfo.MemberType != MemberTypes.Field
-                    && memberInfo.MemberType != MemberTypes.Method
-                    && memberInfo.MemberType != MemberTypes.Property)
-                    {
-                        return false;
-                    }
-
-                    // Only use members from specified namespaces (UnityEngine, Unity.Netorking...)
-                    if (!_allowedNamespaces.Contains(memberInfo.ReflectedType.Namespace))
-                    {
-                        return false;
-                    }
-
-                    // Remove members with specific attributes (like "NativeMethodAttribute")
-                    foreach (var attribute in memberInfo.CustomAttributes)
-                    {
-                        if (_excludedAttributes.Contains(attribute.AttributeType.Name))
-                        {
-                            return false;
-                        }
-                    }
-
-                    // Remove common members not very usefull (like "runInEditMode", "GetInstanceID", etc...)
-                    if (_excludedMembers.Contains(memberInfo.Name))
-                    {
-                        return false;
-                    }
-
-                    // Remove very specific types probably not available at runtime (like ""UnityEngine.Light.SetLightDirty" or "UnityEngine.Material.IsPropertyLocked")
-                    if (_excludedBaseTypes.Contains(memberInfo.ReflectedType.FullName))
-                    {
-                        return false;
-                    }
-                    if (_excludedTypeMembers.Contains($"{memberInfo.ReflectedType.FullName}.{memberInfo.Name}"))
-                    {
-                        return false;
-                    }
-
-
-                    // Method specific filtering (remove operators, "ref" parameters and specific types ("Span`1", "ReadOnlySpan`1") parameters)
-                    var methodInfo = memberInfo as MethodInfo;
-                    if (methodInfo != null)
-                    {
-                        if (methodInfo.IsOperator())
-                        {
-                            return false;
-                        }
-
-                        foreach (var parameter in methodInfo.GetParameters())
-                        {
-                            if (parameter.ParameterType.IsByRef)
-                            {
-                                return false;
-                            }
-
-                            if (_excludedParameterTypes.Contains(parameter.ParameterType.Name))
-                            {
-                                return false;
-                            }
-                        }
-                    }
-
-                    return true;
-                });
-        }
-
-        #endregion
 
         private IEnumerable<object> FindAllPluginStubs()
         {
