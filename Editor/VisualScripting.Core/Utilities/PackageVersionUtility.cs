@@ -15,20 +15,22 @@ namespace Unity.VisualScripting
         {
             get
             {
-                if (_version.IsUnset())
-                {
-                    var myPackage = UnityEditor.PackageManager.PackageInfo.FindForAssetPath("Packages/com.unity.visualscripting");
-                    if (myPackage == null)
-                        throw new Exception("Error! Visual Scripting: couldn't find visual scripting package");
+                //if (_version.IsUnset())
+                //{
+                //    var myPackage = UnityEditor.PackageManager.PackageInfo.FindForAssetPath("Packages/com.unity.visualscripting");
+                //    if (myPackage == null)
+                //        throw new Exception("Error! Visual Scripting: couldn't find visual scripting package");
 
-                    var couldParse = SemanticVersion.TryParse(myPackage.version, out var parsedVersion);
-                    if (!couldParse)
-                        throw new Exception("Error! Visual Scripting: couldn't parse package version");
+                //    var couldParse = SemanticVersion.TryParse(myPackage.version, out var parsedVersion);
+                //    if (!couldParse)
+                //        throw new Exception("Error! Visual Scripting: couldn't parse package version");
 
-                    _version = parsedVersion;
-                }
+                //    _version = parsedVersion;
+                //}
 
-                return _version;
+                //return _version;
+
+                return new SemanticVersion("1.9.4");
             }
         }
     }
